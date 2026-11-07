@@ -1,6 +1,11 @@
 /*
 /.**
 
+/.config/**
+/.config/.copilot/
+/.config/.copilot/**
+/.config/github-copilot/
+/.config/github-copilot/**
 !/.config/
 !/.config/nvim/
 !/.config/nvim/**
@@ -34,6 +39,8 @@
 !/.config/mise/**
 !/.config/slumber/
 !/.config/slumber/**
+!/.config/zellij/
+!/.config/zellij/**
 /.config/wezterm/localconf.lua
 /.config/wezterm/background/settings.lua
 /.config/wezterm/background/img/**
