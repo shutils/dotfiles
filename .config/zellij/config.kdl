@@ -41,8 +41,11 @@ keybinds clear-defaults=true {
             floating true
             move_to_focused_tab true
 						close_on_exit true
-						width "90%"
-						height "90%"
+						pinned true
+						width "30%"
+						height "30%"
+						x "70%"
+						y "0%"
 					}
           SwitchToMode "locked"
 				}
@@ -53,7 +56,7 @@ keybinds clear-defaults=true {
             move_to_focused_tab true
 						close_on_exit true
 						width "30%"
-						height "95%"
+						height "100%"
 						x "70%"
 						pinned true
 					}
