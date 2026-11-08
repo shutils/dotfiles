@@ -36,7 +36,7 @@ keybinds clear-defaults=true {
 					}
           SwitchToMode "locked"
 				}
-        bind "Ctrl u" {
+        bind "Ctrl t" {
 					Run "zsh" {
             floating true
             move_to_focused_tab true
