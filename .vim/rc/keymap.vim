@@ -26,3 +26,5 @@ nnoremap <Leader>_ :source $MYVIMRC<CR>
 nnoremap <Leader>w :w<CR>
 
 set clipboard=unnamedplus
+set autoindent
+set smartindent
