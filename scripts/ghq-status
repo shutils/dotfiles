@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# Show dirty / ahead repositories managed by ghq. No fetch or Git writes.
+set -uo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: ghq-status
+
+Show ghq repositories with staged, modified, untracked, conflicting files,
+or commits ahead of the current branch's upstream. No network access.
+
+  -h, --help          Show this help
+
+Examples:
+  ghq-status
+  ghq-status | less -R
+  watch -n 10 -t ghq-status
+
+Counts are file counts, not line counts. A file may be staged and modified.
+Behind-only repositories and clean branches without upstream are omitted.
+EOF
+}
+
+while (( $# )); do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        *) printf 'ghq-status: unknown argument: %s\n' "$1" >&2; exit 2 ;;
+    esac
+done
+
+for command in ghq git sort mktemp; do
+    if ! command -v "$command" >/dev/null 2>&1; then
+        printf 'ghq-status: required command not found: %s\n' "$command" >&2
+        exit 1
+    fi
+done
+
+temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/ghq-status.XXXXXXXX") || exit 1
+cleanup() {
+    rm -f -- "$temp_dir/repos" "$temp_dir/roots" "$temp_dir/status" "$temp_dir/error"
+    rmdir -- "$temp_dir"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+# Repository discovery uses ghq's line-oriented output; embedded newlines in
+# repository paths are not supported. Git filenames are parsed NUL-delimited.
+scan() {
+    rows=()
+    total=0
+    dirty=0
+    errors=0
+    scan_error=
+    local path root name record branch ahead staged modified untracked conflicts xy state detail
+    local -a roots=()
+    if ! ghq list --full-path >"$temp_dir/repos" 2>"$temp_dir/error"; then
+        scan_error='ERROR: ghq list failed'
+        return 1
+    fi
+    if ! ghq root --all >"$temp_dir/roots" 2>"$temp_dir/error"; then
+        scan_error='ERROR: ghq root failed'
+        return 1
+    fi
+    while IFS= read -r root; do
+        [[ -z $root ]] || roots+=("${root%/}")
+    done <"$temp_dir/roots"
+    if ! LC_ALL=C sort -u -o "$temp_dir/repos" "$temp_dir/repos"; then
+        scan_error='ERROR: could not sort repository list'
+        return 1
+    fi
+    while IFS= read -r path; do
+        [[ -n $path ]] || continue
+        total=$((total + 1))
+        name=$path
+        for root in "${roots[@]}"; do
+            if [[ $path == "$root/"* && ${#root} -lt ${#path} ]]; then
+                detail=${path#"$root/"}
+                (( ${#detail} >= ${#name} )) || name=$detail
+            fi
+        done
+        name=${name//[[:cntrl:]]/?}
+        if ! GIT_OPTIONAL_LOCKS=0 git -C "$path" status --porcelain=v2 -z --branch --untracked-files=all \
+            >"$temp_dir/status" 2>"$temp_dir/error"; then
+            rows+=("$name  ERROR: git status failed")
+            errors=$((errors + 1))
+            continue
+        fi
+        branch='?'; ahead=0; staged=0; modified=0; untracked=0; conflicts=0
+        while IFS= read -r -d '' record; do
+            case "$record" in
+                '# branch.head '*) branch=${record#\# branch.head } ;;
+                '# branch.ab '*)
+                    detail=${record#\# branch.ab +}
+                    ahead=${detail%% *}
+                    ;;
+                '1 '*|'2 '*)
+                    xy=${record:2:2}
+                    [[ ${xy:0:1} == . ]] || staged=$((staged + 1))
+                    [[ ${xy:1:1} == . ]] || modified=$((modified + 1))
+                    # Renames/copies have a second NUL-delimited path.
+                    [[ $record != '2 '* ]] || IFS= read -r -d '' detail
+                    ;;
+                'u '*) conflicts=$((conflicts + 1)) ;;
+                '? '*) untracked=$((untracked + 1)) ;;
+            esac
+        done <"$temp_dir/status"
+        if (( staged + modified + untracked + conflicts + ahead == 0 )); then
+            continue
+        fi
+        dirty=$((dirty + 1))
+        branch=${branch//[[:cntrl:]]/?}
+        state=
+        (( staged == 0 )) || state+=" staged:$staged"
+        (( modified == 0 )) || state+=" modified:$modified"
+        (( untracked == 0 )) || state+=" untracked:$untracked"
+        (( conflicts == 0 )) || state+=" conflicts:$conflicts"
+        (( ahead == 0 )) || state+=" ahead:$ahead"
+        rows+=("$name  [$branch]$state")
+    done <"$temp_dir/repos"
+    (( errors == 0 ))
+}
+
+render() {
+    printf 'Dirty repositories: %s / %s | Errors: %s | Updated: %s\n' \
+        "$dirty" "$total" "$errors" "$(date +%H:%M:%S)"
+    if [[ -n $scan_error ]]; then
+        printf '%s\n' "$scan_error"
+    elif (( ${#rows[@]} == 0 )); then
+        printf 'All repositories are clean.\n'
+    else
+        printf '%s\n' "${rows[@]}"
+    fi
+}
+
+result=0
+scan || result=1
+render
+exit "$result"
