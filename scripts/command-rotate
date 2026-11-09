@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+# Rotate cached command output in a terminal. Requires Bash 4+ and Linux tools.
+set -uo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: command-rotate [-c CONFIG]
+
+Display cached command results, with independent refresh intervals.
+Default config: $XDG_CONFIG_HOME/command-rotate/config.sh
+                (otherwise ~/.config/command-rotate/config.sh)
+
+Keys: Space / Right / left click: next; Left: previous; q / Ctrl+C: quit
+Config changes take effect on restart. Config is trusted Bash code.
+EOF
+}
+
+die() { printf 'command-rotate: %s\n' "$*" >&2; exit 1; }
+
+config=${XDG_CONFIG_HOME:-$HOME/.config}/command-rotate/config.sh
+while (( $# )); do
+    case $1 in
+        -h|--help) usage; exit 0 ;;
+        -c|--config)
+            (( $# >= 2 )) || die 'config path is required'
+            config=$2; shift 2 ;;
+        *) die "unknown argument: $1" ;;
+    esac
+done
+
+[[ -r $config ]] || die "cannot read config: $config"
+declare -a names=() intervals=() commands=() keys=() workers=()
+ROTATE_INTERVAL=10
+COMMAND_TIMEOUT=30
+add_command() {
+    (( $# == 3 )) || die 'add_command requires NAME INTERVAL COMMAND'
+    [[ -n $1 && -n $3 && $2 =~ ^[1-9][0-9]*$ && ${#2} -le 8 ]] ||
+        die 'command name and command must be nonempty; interval must be a positive integer (up to 8 digits)'
+    names+=("$1"); intervals+=("$2"); commands+=("$3")
+}
+# shellcheck source=/dev/null
+source "$config"
+(( ${#commands[@]} )) || die 'no commands configured'
+for value in "$ROTATE_INTERVAL" "$COMMAND_TIMEOUT"; do
+    [[ $value =~ ^[1-9][0-9]*$ && ${#value} -le 8 ]] || die 'interval and timeout must be positive integers (up to 8 digits)'
+done
+[[ -t 0 && -t 1 ]] || die 'an interactive terminal is required'
+[[ ${TERM:-dumb} != dumb ]] || die 'TERM must support cursor control'
+for dependency in tput flock setsid timeout sha256sum sed head tr mktemp realpath date mv cat rm rmdir sleep stty; do
+    command -v "$dependency" >/dev/null 2>&1 || die "required command not found: $dependency"
+done
+
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/command-rotate
+umask 077
+mkdir -p -- "$cache" || die 'could not create cache directory'
+run_dir=$(mktemp -d "$cache/.run.XXXXXXXX") || die 'could not create temporary directory'
+config=$(realpath -- "$config") || die 'could not resolve config path'
+for i in "${!commands[@]}"; do
+    # Include the working directory: relative commands may produce different results.
+    key=$(printf '%s\0' "$config" "$PWD" "${names[i]}" "${intervals[i]}" "$COMMAND_TIMEOUT" "${commands[i]}" | sha256sum)
+    keys+=("${key%% *}")
+done
+
+# Each iteration takes a shared-cache lock, so multiple viewers do not run the
+# same command concurrently. Files are replaced atomically; failed runs keep
+# the last successful stdout. A timestamp limits retries even after a crash.
+worker() {
+    local index=$1 child= nap= next now code finished
+    local dir=$cache/${keys[$1]} tmp=$run_dir/$1
+    worker_cleanup() {
+        trap '' INT TERM HUP
+        if [[ -n $child ]]; then
+            kill -TERM -- "-$child" 2>/dev/null || true
+            sleep 0.1
+            kill -KILL -- "-$child" 2>/dev/null || true
+            wait "$child" 2>/dev/null || true
+        fi
+        if [[ -n $nap ]]; then
+            kill "$nap" 2>/dev/null || true
+            wait "$nap" 2>/dev/null || true
+        fi
+    }
+    trap 'exit 0' INT TERM HUP
+    trap worker_cleanup EXIT
+    mkdir -p -- "$dir" || exit 1
+    exec 9>"$dir/lock"
+    while :; do
+        if flock -n 9; then
+            now=$(date +%s)
+            next=0
+            [[ ! -r $dir/next ]] || read -r next <"$dir/next"
+            [[ $next =~ ^[0-9]+$ ]] || next=0
+            if (( now >= next )); then
+                printf '%s\n' "$((now + intervals[index]))" >"$tmp.next"
+                mv -f -- "$tmp.next" "$dir/next"
+                # A separate session lets shutdown terminate the entire command
+                # tree. Do not leak the cache lock into executed commands.
+                setsid timeout -k 2 "$COMMAND_TIMEOUT" bash -c "${commands[index]}" \
+                    9>&- </dev/null >"$tmp.out" 2>"$tmp.err" &
+                child=$!
+                code=0
+                wait "$child" || code=$?
+                child=
+                finished=$(date +%s)
+                if (( code == 0 )); then
+                    mv -f -- "$tmp.out" "$dir/output"
+                    printf '%s\n' "$finished" >"$tmp.updated"
+                    mv -f -- "$tmp.updated" "$dir/updated"
+                else
+                    mv -f -- "$tmp.out" "$dir/failed-output"
+                fi
+                mv -f -- "$tmp.err" "$dir/error"
+                printf '%s %s\n' "$code" "$finished" >"$tmp.status"
+                mv -f -- "$tmp.status" "$dir/status"
+                # Wait a full interval after completion, not just after start.
+                printf '%s\n' "$((finished + intervals[index]))" >"$tmp.next"
+                mv -f -- "$tmp.next" "$dir/next"
+            fi
+            flock -u 9
+        fi
+        sleep 0.5 &
+        nap=$!
+        wait "$nap" || true
+        nap=
+    done
+}
+
+terminal_active=0
+saved_stty=$(stty -g)
+cleanup() {
+    trap '' INT TERM HUP
+    for pid in "${workers[@]}"; do kill -TERM "$pid" 2>/dev/null || true; done
+    for pid in "${workers[@]}"; do wait "$pid" 2>/dev/null || true; done
+    if (( terminal_active )); then
+        printf '\033[?1000l\033[?1006l'
+        tput cnorm
+        tput rmcup
+        stty "$saved_stty"
+    fi
+    # Only remove this invocation's known temporary files.
+    for i in "${!commands[@]}"; do
+        rm -f -- "$run_dir/$i.out" "$run_dir/$i.err" "$run_dir/$i.next" \
+            "$run_dir/$i.updated" "$run_dir/$i.status"
+    done
+    rmdir -- "$run_dir"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+for i in "${!commands[@]}"; do
+    worker "$i" &
+    workers+=("$!")
+done
+
+terminal_active=1
+tput smcup
+tput civis
+stty -echo -icanon
+printf '\033[?1000h\033[?1006h'
+selected=0
+deadline=$((SECONDS + ROTATE_INTERVAL))
+dirty=1
+last_second=-1
+trap 'dirty=1' WINCH
+
+# Strip terminal controls from command output before rendering. Output is plain
+# text, clipped to the available screen size (no scrolling or escape injection).
+plain() {
+    LC_ALL=C sed -E $'s/\033\\[[0-?]*[ -/]*[@-~]//g' |
+        LC_ALL=C tr -d '\000-\010\013-\037\177' | tr '\t' ' '
+}
+render() {
+    local rows cols dir=${cache}/${keys[selected]} code= updated= line
+    rows=$(tput lines); cols=$(tput cols)
+    (( rows >= 5 && cols >= 10 )) || return
+    # Reserve the last column to avoid terminal auto-wrap.
+    cols=$((cols - 1))
+    tput home
+    tput ed
+    line="[$((selected + 1))/${#commands[@]}] ${names[selected]}"
+    line=$(printf '%s' "$line" | plain)
+    printf '%s\r\n' "${line:0:cols}"
+    [[ ! -r $dir/updated ]] || read -r updated <"$dir/updated"
+    [[ ! -r $dir/status ]] || read -r code _ <"$dir/status"
+    if [[ -z $code ]]; then
+        line='Fetching...'
+    elif [[ $code != 0 ]]; then
+        line="Failed (exit $code); showing last result."
+    elif [[ $updated =~ ^[0-9]+$ ]]; then
+        line="Updated $(( $(date +%s) - updated ))s ago | refresh ${intervals[selected]}s"
+    else
+        line='Waiting for result...'
+    fi
+    printf '%s\r\n\r\n' "${line:0:cols}"
+    {
+        if [[ -f $dir/output ]]; then
+            cat -- "$dir/output"
+        elif [[ -f $dir/failed-output ]]; then
+            cat -- "$dir/failed-output"
+        fi
+        if [[ -n $code && $code != 0 && -s $dir/error ]]; then
+            printf '\nError:\n'
+            cat -- "$dir/error"
+        fi
+    } | head -n "$((rows - 5))" | plain | {
+        while IFS= read -r line || [[ -n $line ]]; do
+            printf '%s\r\n' "${line:0:cols}"
+        done
+    }
+    tput cup "$((rows - 1))" 0
+    line="Space/Right/Click: next | Left: previous | q: quit | next in $((deadline - SECONDS))s"
+    printf '%s' "${line:0:cols}"
+}
+switch_view() {
+    selected=$(( (selected + $1 + ${#commands[@]}) % ${#commands[@]} ))
+    deadline=$((SECONDS + ROTATE_INTERVAL))
+    dirty=1
+}
+while :; do
+    (( SECONDS < deadline )) || switch_view 1
+    if (( dirty || SECONDS != last_second )); then
+        render
+        dirty=0; last_second=$SECONDS
+    fi
+    key=
+    IFS= read -rsn1 -t 0.2 key || continue
+    case $key in
+        q|Q) break ;;
+        ' ') switch_view 1 ;;
+        $'\033')
+            sequence=
+            # Bound both the number of bytes and the wait for partial sequences.
+            for (( n=0; n<40; n++ )); do
+                part=
+                IFS= read -rsn1 -t 0.02 part || break
+                sequence+=$part
+                case $sequence in
+                    '[C') switch_view 1; break ;;
+                    '[D') switch_view -1; break ;;
+                    '[<'*M)
+                        [[ $sequence != '[<0;'* ]] || switch_view 1
+                        break ;;
+                    '[<'*m) break ;;
+                esac
+            done
+            ;;
+    esac
+done
