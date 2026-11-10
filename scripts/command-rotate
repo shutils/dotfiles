@@ -162,6 +162,9 @@ selected=0
 deadline=$((SECONDS + ROTATE_INTERVAL))
 dirty=1
 last_second=-1
+declare -a previous_frame=()
+previous_rows=0
+previous_cols=0
 trap 'dirty=1' WINCH
 
 # Strip terminal controls from command output before rendering. Output is plain
@@ -170,17 +173,11 @@ plain() {
     LC_ALL=C sed -E $'s/\033\\[[0-?]*[ -/]*[@-~]//g' |
         LC_ALL=C tr -d '\000-\010\013-\037\177' | tr '\t' ' '
 }
-render() {
-    local rows cols dir=${cache}/${keys[selected]} code= updated= line
-    rows=$(tput lines); cols=$(tput cols)
-    (( rows >= 5 && cols >= 10 )) || return
-    # Reserve the last column to avoid terminal auto-wrap.
-    cols=$((cols - 1))
-    tput home
-    tput ed
+render_frame() {
+    local rows=$1 cols=$2 dir=${cache}/${keys[selected]} code= updated= line
     line="[$((selected + 1))/${#commands[@]}] ${names[selected]}"
     line=$(printf '%s' "$line" | plain)
-    printf '%s\r\n' "${line:0:cols}"
+    printf '%s\n' "${line:0:cols}"
     [[ ! -r $dir/updated ]] || read -r updated <"$dir/updated"
     [[ ! -r $dir/status ]] || read -r code _ <"$dir/status"
     if [[ -z $code ]]; then
@@ -192,7 +189,7 @@ render() {
     else
         line='Waiting for result...'
     fi
-    printf '%s\r\n\r\n' "${line:0:cols}"
+    printf '%s\n\n' "${line:0:cols}"
     {
         if [[ -f $dir/output ]]; then
             cat -- "$dir/output"
@@ -205,12 +202,40 @@ render() {
         fi
     } | head -n "$((rows - 5))" | plain | {
         while IFS= read -r line || [[ -n $line ]]; do
-            printf '%s\r\n' "${line:0:cols}"
+            printf '%s\n' "${line:0:cols}"
         done
     }
-    tput cup "$((rows - 1))" 0
+}
+render() {
+    local rows cols row line
+    local -a frame=()
+    rows=$(tput lines); cols=$(tput cols)
+    (( rows >= 5 && cols >= 10 )) || return
+    # Reserve the last column to avoid terminal auto-wrap.
+    cols=$((cols - 1))
+    mapfile -t frame < <(render_frame "$rows" "$cols")
+    for (( row=${#frame[@]}; row<rows-1; row++ )); do
+        frame[row]=
+    done
     line="Space/Right/Click: next | Left: previous | q: quit | next in $((deadline - SECONDS))s"
-    printf '%s' "${line:0:cols}"
+    frame[rows-1]=${line:0:cols}
+    # Only clear on initial display or resize, never for a timer tick.
+    if (( rows != previous_rows || cols != previous_cols )); then
+        tput home
+        tput ed
+        previous_frame=()
+    fi
+    for (( row=0; row<rows; row++ )); do
+        if [[ ${frame[row]} != "${previous_frame[row]-}" || ! ${previous_frame[row]+present} ]]; then
+            tput cup "$row" 0
+            printf '%s' "${frame[row]}"
+            # Remove any trailing text left by a longer previous line.
+            tput el
+        fi
+    done
+    previous_frame=("${frame[@]}")
+    previous_rows=$rows
+    previous_cols=$cols
 }
 switch_view() {
     selected=$(( (selected + $1 + ${#commands[@]}) % ${#commands[@]} ))
