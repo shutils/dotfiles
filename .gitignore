@@ -43,6 +43,7 @@
 !/.config/zellij/**
 !/.config/ctxpick/
 !/.config/ctxpick/**
+/.config/ctxpick/config.local.toml
 /.config/wezterm/localconf.lua
 /.config/wezterm/background/settings.lua
 /.config/wezterm/background/img/**
