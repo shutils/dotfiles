@@ -41,6 +41,8 @@
 !/.config/slumber/**
 !/.config/zellij/
 !/.config/zellij/**
+!/.config/ctxpick/
+!/.config/ctxpick/**
 /.config/wezterm/localconf.lua
 /.config/wezterm/background/settings.lua
 /.config/wezterm/background/img/**
@@ -50,6 +52,8 @@
 /.config/zsh/.zcompdump
 !/scripts
 !/scripts/**
+!/.config/command-rotate/
+!/.config/command-rotate/config.sh
 !/.vimrc
 !/.vim/
 !/.vim/*.toml
