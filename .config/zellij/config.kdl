@@ -1,21 +1,18 @@
 keybinds clear-defaults=true {
     normal {
+			  bind "Ctrl p" {
+            LaunchPlugin "file:~/.config/zellij/plugins/ctxpick.wasm" {
+                floating true
+								skip-plugin-cache true
+            }
+						SwitchToMode "locked"
+        }
         bind "left" { MoveFocus "left"; }
         bind "down" { MoveFocus "down"; }
         bind "up" { MoveFocus "up"; }
         bind "right" { MoveFocus "right"; }
         bind "Ctrl f" { ToggleFloatingPanes; SwitchToMode "locked"; }
         bind "Ctrl s" { NewPane "stacked"; SwitchToMode "locked"; }
-        bind "Ctrl p" {
-            LaunchPlugin "file:~/.config/zellij/plugins/zellij-context-bridge.wasm" {
-                floating true
-								mode "floating"
-								skip_plugin_cache true
-								command "bash ~/.config/zellij/scripts/zellij_palette.sh"
-								close_on_exit true
-            }
-            SwitchToMode "locked"
-        }
         bind "Ctrl l" {
 					Run "lazygit" {
             floating true
@@ -63,7 +60,14 @@ keybinds clear-defaults=true {
           SwitchToMode "locked"
 				}
         bind "Ctrl o" {
-					Run "agent-monitor" "--auto-close" {
+            LaunchOrFocusPlugin "session-manager" {
+                floating true
+                move_to_focused_tab true
+            }
+            SwitchToMode "locked"
+        }
+        bind "Ctrl h" {
+					Run "sh" "-c" "cd \"$HOME\" && vim ." {
             floating true
             move_to_focused_tab true
 						close_on_exit true
@@ -73,7 +77,7 @@ keybinds clear-defaults=true {
           SwitchToMode "locked"
 				}
         bind "Ctrl z" {
-					Run "vim" "~/.config/zellij" {
+					Run "sh" "-c" "cd \"$HOME/.config/zellij\" && vim ." {
             floating true
             move_to_focused_tab true
 						close_on_exit true
