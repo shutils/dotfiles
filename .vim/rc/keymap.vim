@@ -26,5 +26,27 @@ nnoremap <Leader>_ :source $MYVIMRC<CR>
 nnoremap <Leader>w :w<CR>
 
 set clipboard=unnamedplus
+
+" WSL から yank した内容を Windows のクリップボードへ送る
+function! s:copy_to_windows_clipboard() abort
+  if v:event.operator !=# 'y' || index(['', '+', '*'], v:event.regname) < 0
+    return
+  endif
+
+  let l:text = join(v:event.regcontents, "\n")
+  if v:event.regtype ==# 'V'
+    let l:text .= "\n"
+  endif
+  " NUL バイトを含む UTF-16LE は Vim の文字列を経由せずに渡す
+  call system('iconv -f UTF-8 -t UTF-16LE | clip.exe', l:text)
+endfunction
+
+augroup wsl_clipboard
+  autocmd!
+  if executable('clip.exe') && executable('iconv') && exists('##TextYankPost')
+    autocmd TextYankPost * call s:copy_to_windows_clipboard()
+  endif
+augroup END
+
 set autoindent
 set smartindent
