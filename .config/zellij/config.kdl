@@ -7,12 +7,25 @@ keybinds clear-defaults=true {
             }
 						SwitchToMode "locked"
         }
+        bind "[" { PreviousSwapLayout; }
+        bind "]" { NextSwapLayout; }
+        bind "i" { TogglePanePinned; }
         bind "left" { MoveFocus "left"; }
         bind "down" { MoveFocus "down"; }
         bind "up" { MoveFocus "up"; }
         bind "right" { MoveFocus "right"; }
         bind "Ctrl f" { ToggleFloatingPanes; SwitchToMode "locked"; }
         bind "Ctrl s" { NewPane "stacked"; SwitchToMode "locked"; }
+        bind "Ctrl j" {
+					Run "tayori" {
+            floating true
+            move_to_focused_tab true
+						close_on_exit true
+						width "80%"
+						height "80%"
+					}
+          SwitchToMode "locked"
+				}
         bind "Ctrl l" {
 					Run "lazygit" {
             floating true
