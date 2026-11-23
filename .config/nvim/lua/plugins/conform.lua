@@ -1,0 +1,13 @@
+return {
+  {
+    "stevearc/conform.nvim",
+    opts = {
+      formatters_by_ft = {
+        lua = { "stylua" },
+        json = { "jq" },
+        kdl = { "kdlfmt" },
+        markdown = { "markdownlint" },
+      },
+    },
+  },
+}
