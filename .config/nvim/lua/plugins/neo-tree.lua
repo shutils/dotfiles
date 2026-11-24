@@ -18,6 +18,7 @@ return {
         mappings = {
           ["l"] = { "open" },
           ["h"] = { "close_node" },
+          ["/"] = { "noop" },
         },
       },
     },
