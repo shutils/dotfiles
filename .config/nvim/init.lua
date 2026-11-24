@@ -1,4 +1,5 @@
 require("config.lazy")
+require("config.windows-clipboard")
 require("mason").setup()
 
 vim.g.mapleader = " "
