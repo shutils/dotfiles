@@ -14,6 +14,7 @@ return {
       { "<leader>b", "<cmd>Neotree close<CR>", desc = "Close Explorer" },
     },
     config = {
+      close_if_last_window = true,
       window = {
         mappings = {
           ["l"] = { "open" },
