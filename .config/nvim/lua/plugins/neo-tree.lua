@@ -11,7 +11,7 @@ return {
     keys = {
       { "<leader>e", "<cmd>Neotree reveal=true<CR>", desc = "Focus Explorer" },
       { "<leader>E", "<cmd>Neotree toggle<CR>", desc = "Toggle Explorer" },
-      { "<leader>b", "<cmd>Neotree close<CR>", desc = "Close Explorer" },
+      { "<C-S-b>", "<cmd>Neotree toggle<CR>", desc = "Toggle Explorer" },
     },
     config = {
       close_if_last_window = true,
